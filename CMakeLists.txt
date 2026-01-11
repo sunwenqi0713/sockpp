@@ -33,6 +33,8 @@ set(SOCKPP_HEADERS
     include/sockpp/TcpListener.h
     include/sockpp/TcpSocket.h
     include/sockpp/UdpSocket.h
+    include/sockpp/TcpClient.h
+    include/sockpp/TcpServer.h
 )
 
 set(SOCKPP_SOURCES
@@ -45,6 +47,8 @@ set(SOCKPP_SOURCES
     src/TcpListener.cpp
     src/TcpSocket.cpp
     src/UdpSocket.cpp
+    src/TcpClient.cpp
+    src/TcpServer.cpp
 )
 
 # Platform-specific sources
