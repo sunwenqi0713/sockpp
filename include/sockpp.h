@@ -18,7 +18,9 @@
 #include <sockpp/Socket.h>
 #include <sockpp/SocketHandle.h>
 #include <sockpp/SocketSelector.h>
+#include <sockpp/TcpClient.h>
 #include <sockpp/TcpListener.h>
+#include <sockpp/TcpServer.h>
 #include <sockpp/TcpSocket.h>
 #include <sockpp/UdpSocket.h>
 
