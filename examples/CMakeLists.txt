@@ -21,3 +21,7 @@ target_link_libraries(simple_client PRIVATE sockpp::sockpp)
 # Simple server example (TcpServer wrapper)
 add_executable(simple_server simple_server.cpp)
 target_link_libraries(simple_server PRIVATE sockpp::sockpp)
+
+# UDP example
+add_executable(udp_example udp_example.cpp udp_wrappers.cpp)
+target_link_libraries(udp_example PRIVATE sockpp::sockpp)
