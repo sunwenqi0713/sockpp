@@ -70,10 +70,9 @@ std::optional<IpAddress> IpAddress::resolve(std::string_view address) {
 }
 
 std::string IpAddress::toString() const {
-  char buffer[INET_ADDRSTRLEN];
   in_addr address{};
   address.s_addr = m_address;
-
+  char buffer[INET_ADDRSTRLEN];
   if (inet_ntop(AF_INET, &address, buffer, sizeof(buffer)) != nullptr) {
     return std::string(buffer);
   }
