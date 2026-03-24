@@ -73,9 +73,9 @@ class SOCKPP_API TcpServer {
   TcpServer(const TcpServer&) = delete;
   TcpServer& operator=(const TcpServer&) = delete;
 
-  // Movable.
-  TcpServer(TcpServer&&) noexcept = default;
-  TcpServer& operator=(TcpServer&&) noexcept = default;
+  // Non-movable: contains std::atomic and std::mutex which are not movable.
+  TcpServer(TcpServer&&) = delete;
+  TcpServer& operator=(TcpServer&&) = delete;
 
   /**
    * @brief Set the callback for new client connections.
@@ -148,6 +148,7 @@ class SOCKPP_API TcpServer {
   struct ClientInfo {
     TcpSocket socket;
     IpAddress address;
+    bool markedForClose{false};  ///< Set by disconnect(); serverLoop handles actual cleanup.
   };
 
   TcpListener m_listener;

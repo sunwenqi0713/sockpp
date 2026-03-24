@@ -72,9 +72,9 @@ class SOCKPP_API TcpClient {
   TcpClient(const TcpClient&) = delete;
   TcpClient& operator=(const TcpClient&) = delete;
 
-  // Movable.
-  TcpClient(TcpClient&&) noexcept = default;
-  TcpClient& operator=(TcpClient&&) noexcept = default;
+  // Non-movable: contains std::atomic and std::mutex which are not movable.
+  TcpClient(TcpClient&&) = delete;
+  TcpClient& operator=(TcpClient&&) = delete;
 
   /**
    * @brief Set the callback for successful connection.
