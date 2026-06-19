@@ -6,163 +6,96 @@
  */
 
 #pragma once
-
 #include <sockpp/Config.h>
 #include <sockpp/IpAddress.h>
 #include <sockpp/SocketSelector.h>
 #include <sockpp/TcpListener.h>
 #include <sockpp/TcpSocket.h>
-
 #include <atomic>
 #include <functional>
-#include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 namespace sockpp {
 
 /**
  * @brief High-level TCP server with callback-based event handling.
  *
+ * Manages multiple client connections in a single acceptor thread using
+ * SocketSelector.  Callbacks are invoked from the server thread, so any
+ * expensive work should be dispatched to a separate thread pool.
+ *
  * Example usage:
  * @code
  * sockpp::TcpServer server;
- *
- * server.onConnection([](sockpp::TcpServer::ClientId id, sockpp::IpAddress addr) {
- *     std::cout << "Client connected: " << id << " from " << addr << "\n";
- * });
- *
  * server.onMessage([&](sockpp::TcpServer::ClientId id, const void* data, std::size_t size) {
- *     // Echo back
- *     server.send(id, data, size);
+ *     server.send(id, data, size); // echo
  * });
- *
- * server.onDisconnection([](sockpp::TcpServer::ClientId id) {
- *     std::cout << "Client disconnected: " << id << "\n";
- * });
- *
  * server.start(8080);
  * @endcode
  */
 class SOCKPP_API TcpServer {
- public:
-  /// Unique identifier for connected clients.
-  using ClientId = std::uint64_t;
+public:
+    using ClientId = std::uint64_t;
+    using ConnectionCallback = std::function<void(ClientId, IpAddress)>;
+    using MessageCallback = std::function<void(ClientId, const void*, std::size_t)>;
+    using DisconnectionCallback = std::function<void(ClientId)>;
 
-  /// Callback type for new connections.
-  using ConnectionCallback = std::function<void(ClientId, IpAddress)>;
+    TcpServer();
+    ~TcpServer();
 
-  /// Callback type for received messages.
-  using MessageCallback = std::function<void(ClientId, const void*, std::size_t)>;
+    TcpServer(const TcpServer&) = delete;
+    TcpServer& operator=(const TcpServer&) = delete;
 
-  /// Callback type for client disconnections.
-  using DisconnectionCallback = std::function<void(ClientId)>;
+    /// Set the callback for new client connections.
+    void onConnection(ConnectionCallback callback);
+    /// Set the callback for received messages.
+    void onMessage(MessageCallback callback);
+    /// Set the callback for client disconnections.
+    void onDisconnection(DisconnectionCallback callback);
 
-  /**
-   * @brief Default constructor.
-   */
-  TcpServer() = default;
+    /// Start the server on the given port (returns false on failure).
+    bool start(unsigned short port, IpAddress address = IpAddress::Any);
+    /// Stop the server and disconnect all clients.
+    void stop();
+    /// Check if the server is running.
+    [[nodiscard]] bool isRunning() const;
 
-  /**
-   * @brief Destructor. Stops the server if running.
-   */
-  ~TcpServer();
+    /// Send data to a specific client.
+    bool send(ClientId clientId, const void* data, std::size_t size);
+    /// Send data to all connected clients.
+    void broadcast(const void* data, std::size_t size);
+    /// Gracefully disconnect a specific client.
+    void disconnect(ClientId clientId);
+    /// Return the number of currently connected clients.
+    [[nodiscard]] std::size_t clientCount() const;
 
-  // Non-copyable.
-  TcpServer(const TcpServer&) = delete;
-  TcpServer& operator=(const TcpServer&) = delete;
+private:
+    struct ClientInfo {
+        TcpSocket socket;
+        IpAddress address;
+        bool markedForClose{false};
+    };
 
-  // Non-movable: contains std::atomic and std::mutex which are not movable.
-  TcpServer(TcpServer&&) = delete;
-  TcpServer& operator=(TcpServer&&) = delete;
+    void serverLoop();
 
-  /**
-   * @brief Set the callback for new client connections.
-   * @param callback Function to call when a client connects.
-   */
-  void onConnection(ConnectionCallback callback);
+    TcpListener m_listener;
+    SocketSelector m_selector;
 
-  /**
-   * @brief Set the callback for received messages.
-   * @param callback Function to call when data is received.
-   */
-  void onMessage(MessageCallback callback);
+    /// Protects m_clients and m_on* callbacks.
+    mutable std::shared_mutex m_mutex;
+    std::unordered_map<ClientId, ClientInfo> m_clients;
 
-  /**
-   * @brief Set the callback for client disconnections.
-   * @param callback Function to call when a client disconnects.
-   */
-  void onDisconnection(DisconnectionCallback callback);
+    std::thread m_thread;
+    std::atomic<bool> m_running{false};
+    std::atomic<ClientId> m_nextClientId{1};
 
-  /**
-   * @brief Start the server on the specified port.
-   * @param port Port to listen on.
-   * @param address Address to bind to (default: any).
-   * @return true if server started successfully.
-   */
-  bool start(unsigned short port, IpAddress address = IpAddress::Any);
-
-  /**
-   * @brief Stop the server.
-   */
-  void stop();
-
-  /**
-   * @brief Check if the server is running.
-   * @return true if the server is running.
-   */
-  [[nodiscard]] bool isRunning() const;
-
-  /**
-   * @brief Send data to a specific client.
-   * @param clientId Target client ID.
-   * @param data Pointer to data to send.
-   * @param size Size of data in bytes.
-   * @return true if send was successful.
-   */
-  bool send(ClientId clientId, const void* data, std::size_t size);
-
-  /**
-   * @brief Send data to all connected clients.
-   * @param data Pointer to data to send.
-   * @param size Size of data in bytes.
-   */
-  void broadcast(const void* data, std::size_t size);
-
-  /**
-   * @brief Disconnect a specific client.
-   * @param clientId Client to disconnect.
-   */
-  void disconnect(ClientId clientId);
-
-  /**
-   * @brief Get the number of connected clients.
-   * @return Number of connected clients.
-   */
-  [[nodiscard]] std::size_t clientCount() const;
-
- private:
-  void serverLoop();
-
-  struct ClientInfo {
-    TcpSocket socket;
-    IpAddress address;
-    bool markedForClose{false};  ///< Set by disconnect(); serverLoop handles actual cleanup.
-  };
-
-  TcpListener m_listener;
-  SocketSelector m_selector;
-  std::unordered_map<ClientId, ClientInfo> m_clients;
-  std::thread m_thread;
-  std::atomic<bool> m_running{false};
-  std::atomic<ClientId> m_nextClientId{1};
-
-  ConnectionCallback m_onConnection;
-  MessageCallback m_onMessage;
-  DisconnectionCallback m_onDisconnection;
-
-  mutable std::mutex m_mutex;
+    ConnectionCallback m_onConnection;
+    MessageCallback m_onMessage;
+    DisconnectionCallback m_onDisconnection;
 };
 
-}  // namespace sockpp
+} // namespace sockpp

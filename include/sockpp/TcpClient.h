@@ -6,16 +6,16 @@
  */
 
 #pragma once
-
 #include <sockpp/Config.h>
 #include <sockpp/IpAddress.h>
 #include <sockpp/TcpSocket.h>
-
 #include <atomic>
 #include <chrono>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace sockpp {
@@ -23,178 +23,95 @@ namespace sockpp {
 /**
  * @brief High-level TCP client with callback-based event handling.
  *
+ * Features:
+ *   - Non-blocking connect with timeout
+ *   - Callback-based message, connect, disconnect, and error events
+ *   - Automatic reconnection with configurable interval
+ *   - Thread-safe send()
+ *
  * Example usage:
  * @code
  * sockpp::TcpClient client;
- *
- * client.onConnected([]() {
- *     std::cout << "Connected to server!\n";
- * });
- *
  * client.onMessage([](const void* data, std::size_t size) {
  *     std::cout << "Received: " << std::string(static_cast<const char*>(data), size) << "\n";
  * });
- *
- * client.onDisconnected([]() {
- *     std::cout << "Disconnected from server\n";
- * });
- *
  * if (client.connect("127.0.0.1", 8080)) {
- *     client.send("Hello, Server!", 14);
+ *     client.send("Hello!");
  * }
  * @endcode
  */
 class SOCKPP_API TcpClient {
- public:
-  /// Callback type for successful connection.
-  using ConnectedCallback = std::function<void()>;
+public:
+    using ConnectedCallback = std::function<void()>;
+    using MessageCallback = std::function<void(const void*, std::size_t)>;
+    using DisconnectedCallback = std::function<void()>;
+    using ErrorCallback = std::function<void(const std::string&)>;
 
-  /// Callback type for received messages.
-  using MessageCallback = std::function<void(const void*, std::size_t)>;
+    TcpClient();
+    ~TcpClient();
 
-  /// Callback type for disconnection.
-  using DisconnectedCallback = std::function<void()>;
+    TcpClient(const TcpClient&) = delete;
+    TcpClient& operator=(const TcpClient&) = delete;
 
-  /// Callback type for connection errors.
-  using ErrorCallback = std::function<void(const std::string&)>;
+    /// Set the callback for successful connection.
+    void onConnected(ConnectedCallback callback);
+    /// Set the callback for received messages.
+    void onMessage(MessageCallback callback);
+    /// Set the callback for disconnection.
+    void onDisconnected(DisconnectedCallback callback);
+    /// Set the callback for errors.
+    void onError(ErrorCallback callback);
 
-  /**
-   * @brief Default constructor.
-   */
-  TcpClient() = default;
+    /// Connect to a server by hostname.
+    bool connect(const std::string& host, unsigned short port,
+                 std::chrono::milliseconds timeout = std::chrono::seconds(5));
+    /// Connect to a server by IP address.
+    bool connect(IpAddress address, unsigned short port,
+                 std::chrono::milliseconds timeout = std::chrono::seconds(5));
 
-  /**
-   * @brief Destructor. Disconnects if connected.
-   */
-  ~TcpClient();
+    /// Disconnect from the server.
+    void disconnect();
+    /// Check if connected.
+    [[nodiscard]] bool isConnected() const;
 
-  // Non-copyable.
-  TcpClient(const TcpClient&) = delete;
-  TcpClient& operator=(const TcpClient&) = delete;
+    /// Send a string view.
+    bool send(std::string_view data);
+    /// Send raw data.
+    bool send(const void* data, std::size_t size);
 
-  // Non-movable: contains std::atomic and std::mutex which are not movable.
-  TcpClient(TcpClient&&) = delete;
-  TcpClient& operator=(TcpClient&&) = delete;
+    /// Get the local port number, or 0 if not connected.
+    [[nodiscard]] unsigned short getLocalPort() const;
+    /// Get the remote address, or nullopt if not connected.
+    [[nodiscard]] std::optional<IpAddress> getRemoteAddress() const;
+    /// Get the remote port, or 0 if not connected.
+    [[nodiscard]] unsigned short getRemotePort() const;
 
-  /**
-   * @brief Set the callback for successful connection.
-   * @param callback Function to call when connected.
-   */
-  void onConnected(ConnectedCallback callback);
+    /// Enable or disable automatic reconnection.
+    void setAutoReconnect(bool enable, std::chrono::milliseconds interval = std::chrono::seconds(3));
 
-  /**
-   * @brief Set the callback for received messages.
-   * @param callback Function to call when data is received.
-   */
-  void onMessage(MessageCallback callback);
+private:
+    void receiveLoop();
+    bool tryReconnect();
+    void invokeError(const std::string& msg);
 
-  /**
-   * @brief Set the callback for disconnection.
-   * @param callback Function to call when disconnected.
-   */
-  void onDisconnected(DisconnectedCallback callback);
+    TcpSocket m_socket;
+    std::thread m_receiveThread;
+    std::atomic<bool> m_connected{false};
+    std::atomic<bool> m_running{false};
+    std::atomic<bool> m_stopRequested{false};
 
-  /**
-   * @brief Set the callback for errors.
-   * @param callback Function to call on error.
-   */
-  void onError(ErrorCallback callback);
+    IpAddress m_serverAddress;
+    unsigned short m_serverPort{0};
+    std::chrono::milliseconds m_timeout{std::chrono::seconds(5)};
 
-  /**
-   * @brief Connect to a server.
-   * @param host Host address (IP or hostname).
-   * @param port Port number.
-   * @param timeout Connection timeout.
-   * @return true if connection was successful.
-   */
-  bool connect(const std::string& host, unsigned short port,
-               std::chrono::milliseconds timeout = std::chrono::seconds(5));
+    std::atomic<bool> m_autoReconnect{false};
+    std::chrono::milliseconds m_reconnectInterval{std::chrono::seconds(3)};
+    mutable std::mutex m_mutex;
 
-  /**
-   * @brief Connect to a server.
-   * @param address Server IP address.
-   * @param port Port number.
-   * @param timeout Connection timeout.
-   * @return true if connection was successful.
-   */
-  bool connect(IpAddress address, unsigned short port, std::chrono::milliseconds timeout = std::chrono::seconds(5));
-
-  /**
-   * @brief Disconnect from the server.
-   */
-  void disconnect();
-
-  /**
-   * @brief Check if connected to a server.
-   * @return true if connected.
-   */
-  [[nodiscard]] bool isConnected() const;
-
-  /**
-   * @brief Send data to the server.
-   * @param data Pointer to data to send.
-   * @param size Size of data in bytes.
-   * @return true if send was successful.
-   */
-  bool send(const void* data, std::size_t size);
-
-  /**
-   * @brief Send a string to the server.
-   * @param message String to send.
-   * @return true if send was successful.
-   */
-  bool send(const std::string& message);
-
-  /**
-   * @brief Get the local port.
-   * @return Local port number, or 0 if not connected.
-   */
-  [[nodiscard]] unsigned short getLocalPort() const;
-
-  /**
-   * @brief Get the remote address.
-   * @return Remote address, or nullopt if not connected.
-   */
-  [[nodiscard]] std::optional<IpAddress> getRemoteAddress() const;
-
-  /**
-   * @brief Get the remote port.
-   * @return Remote port number, or 0 if not connected.
-   */
-  [[nodiscard]] unsigned short getRemotePort() const;
-
-  /**
-   * @brief Enable or disable auto-reconnection.
-   * @param enable Whether to enable auto-reconnect.
-   * @param interval Interval between reconnection attempts.
-   */
-  void setAutoReconnect(bool enable, std::chrono::milliseconds interval = std::chrono::seconds(3));
-
- private:
-  void receiveLoop();
-  void tryReconnect();
-
-  TcpSocket m_socket;
-  std::thread m_receiveThread;
-  std::atomic<bool> m_connected{false};
-  std::atomic<bool> m_running{false};
-
-  // Connection info for reconnect.
-  IpAddress m_serverAddress;
-  unsigned short m_serverPort{0};
-  std::chrono::milliseconds m_timeout{std::chrono::seconds(5)};
-
-  // Auto-reconnect settings.
-  std::atomic<bool> m_autoReconnect{false};
-  std::chrono::milliseconds m_reconnectInterval{std::chrono::seconds(3)};
-
-  // Callbacks.
-  ConnectedCallback m_onConnected;
-  MessageCallback m_onMessage;
-  DisconnectedCallback m_onDisconnected;
-  ErrorCallback m_onError;
-
-  mutable std::mutex m_mutex;
+    ConnectedCallback m_onConnected;
+    MessageCallback m_onMessage;
+    DisconnectedCallback m_onDisconnected;
+    ErrorCallback m_onError;
 };
 
-}  // namespace sockpp
+} // namespace sockpp
