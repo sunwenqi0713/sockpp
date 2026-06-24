@@ -1,5 +1,5 @@
 /**
- * @file udp_example.cpp
+ * @file udp_chat.cpp
  * @brief Example of using Udp wrapper.
  */
 

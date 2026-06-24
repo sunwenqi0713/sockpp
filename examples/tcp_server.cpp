@@ -1,5 +1,5 @@
 /**
- * @file simple_server.cpp
+ * @file tcp_server.cpp
  * @brief Example of using TcpServer wrapper.
  */
 

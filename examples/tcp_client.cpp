@@ -1,5 +1,5 @@
 /**
- * @file simple_client.cpp
+ * @file tcp_client.cpp
  * @brief Example of using TcpClient wrapper.
  */
 
